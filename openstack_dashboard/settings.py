@@ -85,6 +85,8 @@ MIDDLEWARE = (
     'horizon.middleware.SimultaneousSessionsMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'horizon.middleware.HorizonMiddleware',
+    'openstack_dashboard.contrib.firewall_only.middleware.'
+    'FirewallOnlyMiddleware',
     'horizon.themes.ThemeMiddleware',
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',

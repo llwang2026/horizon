@@ -14,12 +14,20 @@
 
 | 文件 | 说明 |
 |------|------|
-| `deploy_firewall_only.sh` | 一键部署（建角色 + 授权 + 放中间件 + 打补丁 + 改配置 + 重启） |
-| `middleware.py` | 收口中间件源码（随 bundle 附带） |
+| `deploy_firewall_only.sh` | 一键部署（建角色 + 授权 + 打补丁 + 重启） |
 | `fwaas_v2_all_tenants.patch` | 跨租户列表补丁 |
 | `README.md` | 本说明 |
 
-本目录**自包含**：拷到 controller 任意位置即可运行，不要求 horizon 仓库在位。
+> 收口中间件（`FirewallOnlyMiddleware`）现已内置在 Horizon 里
+> （`openstack_dashboard/contrib/firewall_only/middleware.py`，并已直接写入
+> `openstack_dashboard/settings.py` 的 `MIDDLEWARE`），随 Horizon 安装即自动生效，
+> **不再需要**拷贝 `middleware.py` 或修改 `local_settings` 来注册中间件。默认只有
+> 被赋予 `fw_admin` 角色的用户才会被收口，其他人不受影响。若需要自定义角色名、
+> 隐藏的仪表盘、面板白名单或落地页，直接在 `local_settings.py` 里覆盖对应的
+> `FIREWALL_ONLY_*` 设置项即可（见下方"可选环境变量"之后的说明），无需重新部署
+> 任何文件。
+
+本目录内容围绕 fwaas 补丁与角色/用户授权，不要求 horizon 仓库在位即可运行。
 
 ## 前置条件
 
@@ -31,7 +39,7 @@
 
 ### 1. 创建 SRE 用户并授权
 
-脚本只做「放中间件 + 打补丁 + 改配置 + 重启」，用户/角色请先按下面手动创建。
+脚本只做「打补丁 + 重启」，用户/角色请先按下面手动创建。
 
 思路：**查一个已存在的项目 → 建一个 `sre_<项目名>` 用户 → 在该项目上授予 `manager` 角色 + `fw_admin` 标记角色。**
 
@@ -73,7 +81,7 @@ cd /opt/firewall_only          # 本目录拷贝到 controller 的位置
 SRE_USER=sre_mycloud SRE_PROJECT=mycloud bash deploy_firewall_only.sh
 ```
 
-脚本依次执行：校验凭证 → 放中间件 → 打补丁（自动备份、幂等）→ 改 `local_settings`（幂等）→ 重启 httpd。
+脚本依次执行：校验凭证 → 打补丁（自动备份、幂等）→ 重启 httpd。
 
 ### 3. 验证
 
@@ -88,43 +96,39 @@ SRE_USER=sre_mycloud SRE_PROJECT=mycloud bash deploy_firewall_only.sh
 | `SRE_USER` | `sre_<项目名>` | SRE 用户名（建议为 `sre_` + 项目名） |
 | `SRE_PROJECT` | （必填） | 已存在的项目名称 |
 | `SRE_DOMAIN` | `Default` | 域 |
-| `MARKER_ROLE` | `fw_admin` | 收口标记角色 |
-| `HORIZON_LOCAL` | `/usr/share/openstack-dashboard/openstack_dashboard/local` | 中间件目录 |
-| `LOCAL_SETTINGS` | `/etc/openstack-dashboard/local_settings` | Horizon 配置 |
+| `MARKER_ROLE` | `fw_admin` | 收口标记角色（对应 Horizon 内置的 `FIREWALL_ONLY_ROLES` 设置，默认值一致） |
 | `HTTPD_RELOAD` | `systemctl restart httpd` | 重启命令 |
 
-非标准安装（如 devstack）才需覆盖路径，**注意指向运行时加载路径，不是 git 仓库源码目录**：
-
 ```bash
-SRE_USER=sre_mycloud SRE_PROJECT=mycloud \
-  HORIZON_LOCAL=/opt/stack/horizon/openstack_dashboard/local \
-  LOCAL_SETTINGS=/etc/openstack-dashboard/local_settings.py \
-  bash deploy_firewall_only.sh
+SRE_USER=sre_mycloud SRE_PROJECT=mycloud bash deploy_firewall_only.sh
 ```
+
+若需要自定义标记角色名、隐藏的仪表盘、面板白名单或落地页，直接在 `local_settings.py`
+里覆盖 `FIREWALL_ONLY_ROLES` / `FIREWALL_ONLY_USERS` / `FIREWALL_ONLY_PANEL_SLUGS` /
+`FIREWALL_ONLY_HIDDEN_DASHBOARDS` / `FIREWALL_ONLY_LANDING`（重启 httpd 生效即可，
+无需重新部署任何文件）。
 
 ## 回滚
 
 ```bash
-# 1) 从 local_settings 删除标记块：# --- Firewall-only SRE restriction (Plan A)
-# 2) 删除中间件
-rm -f /usr/share/openstack-dashboard/openstack_dashboard/local/middleware.py
-# 3) 恢复补丁（二选一）
+# 1) 恢复补丁（二选一）
 SITE=$(python3 -c "import neutron_fwaas_dashboard,os;print(os.path.dirname(os.path.dirname(neutron_fwaas_dashboard.__file__)))")
 cp -p "$SITE/neutron_fwaas_dashboard/api/fwaas_v2.py.pre-firewall-only.bak" \
       "$SITE/neutron_fwaas_dashboard/api/fwaas_v2.py"
 #    cd "$SITE" && patch -R -p1 < /opt/firewall_only/fwaas_v2_all_tenants.patch
-# 4) 撤销授权
+# 2) 撤销授权
 openstack role remove --user sre_mycloud --user-domain Default --project mycloud --project-domain Default manager
 openstack role remove --user sre_mycloud --user-domain Default --project mycloud --project-domain Default fw_admin
-# 5) 重启
+# 3) 重启
 systemctl restart httpd
 ```
+
+> 收口中间件本身是 Horizon 内置能力，不需要（也无法通过本目录）卸载；只要没有
+> 任何用户持有 `fw_admin`（或 `FIREWALL_ONLY_ROLES` 里配置的角色），它就完全不生效。
 
 ## 注意事项
 
 - 升级 `neutron-fwaas-dashboard` 后补丁会被覆盖，需重跑脚本。
 - 普通（非 admin）租户完全不受影响。
-- bundle 里的 `middleware.py` 是拷贝，canonical 源在 `openstack_dashboard/local/middleware.py`；改了源文件记得同步：
-  ```bash
-  cp -p openstack_dashboard/local/middleware.py tools/firewall_only/middleware.py
-  ```
+- 收口中间件源码在 `openstack_dashboard/contrib/firewall_only/middleware.py`，
+  随 Horizon 升级/打包自动分发，本目录不再包含它的副本。

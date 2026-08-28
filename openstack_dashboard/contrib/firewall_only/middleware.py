@@ -45,6 +45,13 @@ Restricted users:
     is the first firewall panel found, or FIREWALL_ONLY_LANDING if set.
 
 Non-restricted users (real admins) are completely unaffected.
+
+This ships as a built-in, always-loaded middleware (see MIDDLEWARE in
+openstack_dashboard/settings.py) exactly like horizon.middleware.
+HorizonMiddleware or horizon.middleware.SimultaneousSessionsMiddleware. Its
+defaults (openstack_dashboard/defaults.py) make it a no-op for everyone
+except users who are explicitly given the FIREWALL_ONLY_ROLES role(s) --
+no local_settings.py edit is required to turn it on.
 """
 
 import threading
@@ -66,8 +73,8 @@ _LANDING = "/dashboard/project/firewalls/"
 def _is_restricted(user):
     if not user or not getattr(user, "is_authenticated", False):
         return False
-    cfg_roles = [r.lower() for r in getattr(settings, "FIREWALL_ONLY_ROLES", ["fw_admin"])]
-    cfg_users = getattr(settings, "FIREWALL_ONLY_USERS", [])
+    cfg_roles = [r.lower() for r in settings.FIREWALL_ONLY_ROLES]
+    cfg_users = settings.FIREWALL_ONLY_USERS
     if cfg_roles:
         roles = {r["name"].lower() for r in getattr(user, "roles", [])}
         if roles.intersection(cfg_roles):
@@ -78,7 +85,7 @@ def _is_restricted(user):
 
 
 def _panel_is_firewall(panel):
-    slugs = getattr(settings, "FIREWALL_ONLY_PANEL_SLUGS", None)
+    slugs = settings.FIREWALL_ONLY_PANEL_SLUGS
     slug = (getattr(panel, "slug", "") or "").lower()
     if slugs:
         return slug in {s.lower() for s in slugs}
@@ -134,9 +141,7 @@ def _wrap():
             return
 
         hidden_dashboards = {
-            d.lower()
-            for d in getattr(settings, "FIREWALL_ONLY_HIDDEN_DASHBOARDS",
-                             ["admin", "identity", "settings"])
+            d.lower() for d in settings.FIREWALL_ONLY_HIDDEN_DASHBOARDS
         }
 
         # NOTE: we patch the *class* methods (type(dash).can_access /
@@ -169,7 +174,7 @@ def _wrap():
                 if _panel_is_firewall(panel):
                     prefixes.append("/dashboard/%s/%s" % (dash.slug, panel.slug))
         _FW_PREFIXES = prefixes
-        configured = getattr(settings, "FIREWALL_ONLY_LANDING", None)
+        configured = settings.FIREWALL_ONLY_LANDING
         if configured:
             _LANDING = configured if configured.startswith("/") else "/" + configured
         elif prefixes:

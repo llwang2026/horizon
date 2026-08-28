@@ -569,3 +569,16 @@ KUBECONFIG_CERTIFICATE_AUTHORITY_DATA = ""
 # Services may require a System Scope token for certain operations. This
 # settings enables the use of the system scope token on per-service basis.
 SYSTEM_SCOPE_SERVICES = []
+
+# openstack_dashboard.contrib.firewall_only.middleware.FirewallOnlyMiddleware
+# restricts users matching FIREWALL_ONLY_ROLES/FIREWALL_ONLY_USERS to only see
+# firewall-related panels in the UI. By default this only affects users that
+# are explicitly granted the 'fw_admin' role -- everyone else is unaffected.
+FIREWALL_ONLY_ROLES = ['fw_admin']
+FIREWALL_ONLY_USERS = []
+# None means "any panel whose slug contains 'firewall'". Set to a list of
+# exact panel slugs to restrict further.
+FIREWALL_ONLY_PANEL_SLUGS = None
+FIREWALL_ONLY_HIDDEN_DASHBOARDS = ['admin', 'identity', 'settings']
+# None means "the first firewall panel found".
+FIREWALL_ONLY_LANDING = None
